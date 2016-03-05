@@ -9,6 +9,9 @@ Python implementation by: Roman Stanchak, James Bowman
 import sys
 import cv2.cv as cv
 from optparse import OptionParser
+import serial
+import time
+import commands
 
 # Parameters for haar detection
 # From the API:
@@ -24,43 +27,60 @@ haar_scale = 1.2
 min_neighbors = 2
 haar_flags = 0
 
-def detect_and_draw(img, cascade):
-    # allocate temporary images
-    gray = cv.CreateImage((img.width,img.height), 8, 1)
-    small_img = cv.CreateImage((cv.Round(img.width / image_scale),
-			       cv.Round (img.height / image_scale)), 8, 1)
+class Face:
+    def __init__(self):
+        self.px = 0
+        self.cs = 0
 
-    # convert color input image to grayscale
-    cv.CvtColor(img, gray, cv.CV_BGR2GRAY)
-
-    # scale input image for faster processing
-    cv.Resize(gray, small_img, cv.CV_INTER_LINEAR)
-
-    cv.EqualizeHist(small_img, small_img)
-
-    if(cascade):
-        t = cv.GetTickCount()
-        faces = cv.HaarDetectObjects(small_img, cascade, cv.CreateMemStorage(0),
-                                     haar_scale, min_neighbors, haar_flags, min_size)
-        t = cv.GetTickCount() - t
-        print "detection time = %gms" % (t/(cv.GetTickFrequency()*1000.))
-        if faces:
-            for ((x, y, w, h), n) in faces:
-                # the input to cv.HaarDetectObjects was resized, so scale the 
-                # bounding box of each face and convert it to two CvPoints
-                pt1 = (int(x * image_scale), int(y * image_scale))
-                pt2 = (int((x + w) * image_scale), int((y + h) * image_scale))
-                cv.Rectangle(img, pt1, pt2, cv.RGB(255, 0, 0), 3, 8, 0)
-
-    cv.ShowImage("result", img)
+    def detect_and_draw(self,img, cascade,ser):
+        # allocate temporary images
+        gray = cv.CreateImage((img.width,img.height), 8, 1)
+        small_img = cv.CreateImage((cv.Round(img.width / image_scale),
+    			       cv.Round (img.height / image_scale)), 8, 1)
+    
+        # convert color input image to grayscale
+        cv.CvtColor(img, gray, cv.CV_BGR2GRAY)
+    
+        # scale input image for faster processing
+        cv.Resize(gray, small_img, cv.CV_INTER_LINEAR)
+    
+        cv.EqualizeHist(small_img, small_img)
+    
+        if(cascade):
+            t = cv.GetTickCount()
+            faces = cv.HaarDetectObjects(small_img, cascade, cv.CreateMemStorage(0),
+                                         haar_scale, min_neighbors, haar_flags, min_size)
+            t = cv.GetTickCount() - t
+            print "detection time = %gms" % (t/(cv.GetTickFrequency()*1000.))
+            if faces:
+                for ((x, y, w, h), n) in faces:
+                    self.cx = x
+    		    if(self.cx-self.px>0):
+                        ser.write("r")			
+                        print "turn right"
+    		    else:
+                        ser.write("l")
+                        print "turn left"
+                    self.px = self.cx
+                    # the input to cv.HaarDetectObjects was resized, so scale the 
+                    # bounding box of each face and convert it to two CvPoints
+                    pt1 = (int(x * image_scale), int(y * image_scale))
+                    pt2 = (int((x + w) * image_scale), int((y + h) * image_scale))
+                    cv.Rectangle(img, pt1, pt2, cv.RGB(255, 0, 0), 3, 8, 0)
+    
+        cv.ShowImage("result", img)
 
 if __name__ == '__main__':
+    status,output = commands.getstatusoutput("ls /dev/ttyACM*")
+    ser = serial.Serial(output, 9600)  
 
     parser = OptionParser(usage = "usage: %prog [options] [filename|camera_index]")
     parser.add_option("-c", "--cascade", action="store", dest="cascade", type="str", help="Haar cascade file, default %default", default = "../data/haarcascades/haarcascade_frontalface_alt.xml")
     (options, args) = parser.parse_args()
 
     cascade = cv.Load(options.cascade)
+
+    f = Face()
     
     if len(args) != 1:
         parser.print_help()
@@ -107,13 +127,15 @@ if __name__ == '__main__':
             else:
                 cv.Flip(frame, frame_copy, 0)
             
-            detect_and_draw(frame_copy, cascade)
+            f.detect_and_draw(frame_copy, cascade,ser)
 
             if cv.WaitKey(10) >= 0:
                 break
     else:
         image = cv.LoadImage(input_name, 1)
-        detect_and_draw(image, cascade)
+        f.detect_and_draw(image, cascade, ser)
         cv.WaitKey(0)
 
     cv.DestroyWindow("result")
+
+    ser.close()      
